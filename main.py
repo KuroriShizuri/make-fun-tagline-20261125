@@ -1,97 +1,77 @@
 #!/usr/bin/env python3
-"""Write the one-line make.fun tagline to entry.txt.
+"""One-line tagline for make.fun.
 
-Usage:
-    python3 main.py [--check] [--self-test]
+With no arguments this writes the tagline to entry.txt inside
+$MAKEFUN_OUTPUT_DIR (or /output when that variable is unset). The file
+holds exactly the tagline, byte for byte, with no newline at the end.
 
-Without flags, writes the entry to $MAKEFUN_OUTPUT_DIR/entry.txt
-(default /output/entry.txt), with no trailing newline, then reads it
-back and confirms it is byte-identical to the line below.
---check validates the line only. --self-test validates and checks a
-byte-identical write/read round-trip in a temporary directory.
+    python3 main.py            write entry.txt
+    python3 main.py --check    only check the tagline against the gate
+    python3 main.py --self-test write to a scratch dir and check it
 """
 
-import argparse
 import os
 import sys
 import tempfile
+from pathlib import Path
 
-LINE = "AI agents build code, win bounties, get paid in USDC."
-
-
-def validate(line):
-    """The gate: UTF-8 text of 1 to 100 characters, not only whitespace,
-    a single line."""
-    if not isinstance(line, str):
-        raise ValueError("entry must be text")
-    if not 1 <= len(line) <= 100:
-        raise ValueError(f"entry must be 1-100 characters, got {len(line)}")
-    if not line.strip():
-        raise ValueError("entry must not be only whitespace")
-    if "\n" in line or "\r" in line:
-        raise ValueError("entry must be a single line")
-    line.encode("utf-8")
-    return True
+TAGLINE = "AI agents build code, win bounties, get paid in USDC."
+LIMIT = 100
+DEFAULT_DIR = "/output"
 
 
-def validate_written(path):
-    """Re-validate the file on disk: it must hold a non-empty line of
-    1-100 characters, or the run fails instead of shipping a bad entry."""
-    with open(path, "rb") as handle:
-        data = handle.read()
+def gate(text):
+    """Return None when text passes the competition gate, else the reason."""
+    if not text.strip():
+        return "tagline is blank"
+    if len(text) > LIMIT:
+        return f"tagline is {len(text)} characters, over the {LIMIT} limit"
+    if text != text.strip() or "\n" in text or "\r" in text:
+        return "tagline must be one line with no surrounding whitespace"
     try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ValueError("entry.txt is not valid UTF-8")
-    validate(text)
-    return text
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return "tagline is not valid UTF-8"
+    return None
 
 
-def write_entry(directory):
-    """Write exactly LINE, no trailing newline, and verify the round-trip."""
-    validate(LINE)
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, "entry.txt")
-    with open(path, "w", encoding="utf-8", newline="") as handle:
-        handle.write(LINE)
-    with open(path, "rb") as handle:
-        data = handle.read()
-    if data != LINE.encode("utf-8"):
-        raise ValueError("entry.txt is not byte-identical to the entry line")
-    validate_written(path)
+def complain(problem):
+    print(f"tagline rejected: {problem}", file=sys.stderr)
+    return 1
+
+
+def destination():
+    return Path(os.environ.get("MAKEFUN_OUTPUT_DIR", DEFAULT_DIR)) / "entry.txt"
+
+
+def write_tagline(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(TAGLINE.encode("utf-8"))
+    # Read the file back from disk: the write only counts if what landed
+    # on disk is byte-identical to the tagline, no extra bytes included.
+    if path.read_bytes() != TAGLINE.encode("utf-8"):
+        raise SystemExit(f"read-back mismatch: {path} does not hold the tagline")
+    if gate(path.read_text(encoding="utf-8")) is not None:
+        raise SystemExit(f"read-back mismatch: {path} fails the gate on disk")
     return path
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true",
-                        help="validate the entry line only")
-    parser.add_argument("--self-test", action="store_true",
-                        help="validate and check a write/read round-trip "
-                        "in a temporary directory")
-    args = parser.parse_args(argv)
-
-    if args.check:
-        validate(LINE)
-        print(f"OK: {len(LINE)} characters, within the 1-100 gate")
+def run(argv):
+    problem = gate(TAGLINE)
+    if problem:
+        return complain(problem)
+    if "--check" in argv:
+        print(f"tagline OK: {len(TAGLINE)} characters, inside the 1-{LIMIT} gate")
         return 0
-
-    if args.self_test:
-        validate(LINE)
-        with tempfile.TemporaryDirectory() as tmp:
-            path = write_entry(tmp)
-        print(f"OK: self-test passed, {path} round-trip byte-identical")
+    if "--self-test" in argv:
+        with tempfile.TemporaryDirectory() as scratch:
+            write_tagline(Path(scratch) / "entry.txt")
+        print(f"self-test OK: {len(TAGLINE)}-character tagline round-trips cleanly")
         return 0
-
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    path = write_entry(out_dir)
-    print(f"Wrote {len(LINE)}-character entry to {path}")
+    path = write_tagline(destination())
+    print(f"wrote {len(TAGLINE)}-character tagline to {path}")
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except ValueError as exc:
-        print(f"invalid entry: {exc}", file=sys.stderr)
-        sys.exit(1)
+    raise SystemExit(run(sys.argv[1:]))
