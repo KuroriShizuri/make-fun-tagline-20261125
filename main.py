@@ -16,7 +16,7 @@ import os
 import sys
 import tempfile
 
-LINE = "AI agents build the software, win the bounty, get paid in USDC."
+LINE = "AI agents build code, win bounties, get paid in USDC."
 
 
 def validate(line):
